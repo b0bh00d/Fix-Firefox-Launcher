@@ -1,0 +1,2 @@
+:: Update the binPath setting for your particular (absolute) location
+sc.exe create FixFirefoxLauncher binPath= "M:\Projects\Rust\fix-firefox-launcher\target\release\fix_firefox_launcher.exe" DisplayName= "Fix Firefox Launcher"
