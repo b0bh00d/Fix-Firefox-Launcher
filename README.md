@@ -12,8 +12,8 @@ This project is an extension of [my preivous work](https://github.com/b0bh00d/Fi
 
 Clicking (or right-clicking) links anywhere triggers the use of a specific launcher string for the Firefox browser.  This string can be found in a pair of Windows registry values under the paths
 
-`HKEY_CLASSES_ROOT\FirefoxHTML_<id>\shell\open\command`
-`HKEY_CLASSES_ROOT\FirefoxURL_<id>\shell\open\command`
+- `HKEY_CLASSES_ROOT\FirefoxHTML_<id>\shell\open\command`
+- `HKEY_CLASSES_ROOT\FirefoxURL_<id>\shell\open\command`
 
 The default entries for these keys hold the command that Windows will execute when following links you click.
 
