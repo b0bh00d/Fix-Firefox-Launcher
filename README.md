@@ -5,7 +5,7 @@
 </p>
 
 # Fix Firefox Launcher
-A Windows service to keep Firefox from destroying custom launch options.
+A Windows service to keep Firefox from replacing custom launch options.
 
 ## Summary
 This project is an extension of [my preivous work](https://github.com/b0bh00d/Fix-Chrome-Launcher) to address similar behavior in Chrome.  You can review the rationale there; I'll only talk about the variations here.
