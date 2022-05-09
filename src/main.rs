@@ -8,35 +8,31 @@
 //
 // For giggles, this time I did it in Rust instead of Go.
 
-#[macro_use] extern crate windows_service;
+#[macro_use]
+extern crate windows_service;
 extern crate winreg;
-#[macro_use] extern crate log;
+#[macro_use]
+extern crate log;
+extern crate argmap;
 extern crate eventlog;
 extern crate regex;
-extern crate argmap;
 
-static APP_NAME : &str = "FixFirefoxLauncher";
-static DEFAULT_OPTIONS : &str = "-private-window \"%1\"";
-static DEFAULT_INTERVAL : u32 = 60;
+static APP_NAME: &str = "FixFirefoxLauncher";
+static DEFAULT_OPTIONS: &str = "-private-window \"%1\"";
+static DEFAULT_INTERVAL: u32 = 60;
 
 use std::ffi::OsString;
-use std::{
-    thread,
-    time::Instant,
-    time::Duration,
-};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::{thread, time::Duration, time::Instant};
 
 use windows_service::service::{
-    ServiceControl, ServiceControlAccept,
-    ServiceExitCode, ServiceState,
-    ServiceStatus, ServiceType,
+    ServiceControl, ServiceControlAccept, ServiceExitCode, ServiceState, ServiceStatus, ServiceType,
 };
-use windows_service::service_dispatcher;
 use windows_service::service_control_handler::{self, ServiceControlHandlerResult};
+use windows_service::service_dispatcher;
 
-use winreg::{RegKey, enums::*};
+use winreg::{enums::*, RegKey};
 
 define_windows_service!(ffi_service_main, service_main);
 
@@ -46,15 +42,18 @@ struct ServiceData {
     interval: u32,
 }
 
-fn extract_executable(s : &str) -> String {
+fn extract_executable(s: &str) -> String {
     let re = regex::Regex::new("\"(.+?)\"").unwrap();
     match re.find(s) {
         Some(m) => m.as_str().to_string(),
-        None => String::new()
+        None => String::new(),
     }
 }
 
-fn set_service_state(status_handle: &service_control_handler::ServiceStatusHandle, state: windows_service::service::ServiceState) -> windows_service::Result<()> {
+fn set_service_state(
+    status_handle: &service_control_handler::ServiceStatusHandle,
+    state: windows_service::service::ServiceState,
+) -> windows_service::Result<()> {
     let next_status = ServiceStatus {
         // Should match the one from system service registry
         service_type: ServiceType::OWN_PROCESS,
@@ -81,19 +80,23 @@ fn service_main(arguments: Vec<OsString>) {
     eventlog::init(&APP_NAME, log::Level::Info).unwrap();
 
     // create our global data instance
-    let mut data = Box::new(ServiceData{key: String::new(), options: String::from(DEFAULT_OPTIONS), interval: DEFAULT_INTERVAL});
+    let mut data = Box::new(ServiceData {
+        key: String::new(),
+        options: String::from(DEFAULT_OPTIONS),
+        interval: DEFAULT_INTERVAL,
+    });
 
     // locate the Firefox entries in the HKCR tree
     for i in RegKey::predef(HKEY_CLASSES_ROOT)
-        .enum_keys().map(|x| x.unwrap())
+        .enum_keys()
+        .map(|x| x.unwrap())
         .filter(|x| x.starts_with("FirefoxHTML"))
     {
         // grab the key suffix value from the name
         let items = i.split("-").collect::<Vec<_>>();
         if items.len() > 1 {
             data.key = items[1].to_string();
-        }
-        else {
+        } else {
             warn!("\"{}\" was not in the expected format; exiting.", i);
         }
     }
@@ -117,25 +120,23 @@ fn service_main(arguments: Vec<OsString>) {
                 match handle.get_value("ffl_options") as Result<String, std::io::Error> {
                     Ok(value) => {
                         data.options = value;
-                    },
+                    }
                     // if it's not there, we just use the default
-                    Err(_e) => {
-                    },
+                    Err(_e) => {}
                 }
 
                 match handle.get_value("ffl_interval") as Result<u32, std::io::Error> {
                     Ok(value) => {
                         data.interval = value;
-                    },
+                    }
                     // if it's not there, we just use the default
-                    Err(_e) => {
-                    },
+                    Err(_e) => {}
                 }
-            },
+            }
             // we can't open the Firefox key?  that's not good
             Err(value) => {
                 error!("{:?}", value);
-            },
+            }
         }
 
         // highest: are we receiving args from the Windows Service panel?
@@ -143,7 +144,10 @@ fn service_main(arguments: Vec<OsString>) {
         if !arguments.is_empty() && arguments.len() > 1 {
             // convert 'arguments' into a form that argmap will digest
 
-            let v: Vec<_> = arguments.into_iter().filter_map(|a| a.into_string().ok()).collect();
+            let v: Vec<_> = arguments
+                .into_iter()
+                .filter_map(|a| a.into_string().ok())
+                .collect();
             let (_args, argv) = argmap::parse(v.into_iter());
 
             // look for the following arguments:
@@ -151,11 +155,9 @@ fn service_main(arguments: Vec<OsString>) {
             //   --ffl_options="<opts>"
 
             match argv.get("ffl_interval") {
-                Some(vec) => {
-                    match vec[0].parse::<u32>() {
-                        Ok(interval) => data.interval = interval,
-                        Err(_e) => warn!("Failed to convert {:?} into u32.", vec[0])
-                    }
+                Some(vec) => match vec[0].parse::<u32>() {
+                    Ok(interval) => data.interval = interval,
+                    Err(_e) => warn!("Failed to convert {:?} into u32.", vec[0]),
                 },
                 None => {}
             }
@@ -165,13 +167,15 @@ fn service_main(arguments: Vec<OsString>) {
             }
         }
 
-        info!("Using runtime values: \"{}\", {}", data.options, data.interval);
+        info!(
+            "Using runtime values: \"{}\", {}",
+            data.options, data.interval
+        );
 
         if let Err(value) = run_service(data) {
             error!("{:?}", value);
         }
-    }
-    else {
+    } else {
         // tell them we can't find Firefox launch commands in the registry
         warn!("Firefox launch commands were not detected in the registry (Did you actually install it?); exiting.");
     }
@@ -189,9 +193,7 @@ fn run_service(data: Box<ServiceData>) -> windows_service::Result<()> {
                 event_stop.store(true, Ordering::SeqCst);
                 ServiceControlHandlerResult::NoError
             }
-            ServiceControl::Interrogate => {
-                ServiceControlHandlerResult::NoError
-            }
+            ServiceControl::Interrogate => ServiceControlHandlerResult::NoError,
             _ => ServiceControlHandlerResult::NotImplemented,
         }
     };
@@ -214,16 +216,17 @@ fn run_service(data: Box<ServiceData>) -> windows_service::Result<()> {
         let elapsed = now.elapsed();
         if elapsed.as_secs() as u32 >= data.interval {
             let hkcr = RegKey::predef(HKEY_CLASSES_ROOT);
-            match hkcr.open_subkey_with_flags(&ff_html_cmd_key, KEY_QUERY_VALUE|KEY_SET_VALUE) {
+            match hkcr.open_subkey_with_flags(&ff_html_cmd_key, KEY_QUERY_VALUE | KEY_SET_VALUE) {
                 Ok(reg_key) => {
-                    let launch_str : String = reg_key.get_value("").unwrap();
-        
+                    let launch_str: String = reg_key.get_value("").unwrap();
+
                     // if the registry key does not contain the required
                     // options, then Firefox likely did an update and we
                     // need to check that the launcher string is using
                     // arguments that we prefer...
 
-                    if !launch_str.contains(&data.options) {  // <-- this could be more discrete
+                    if !launch_str.contains(&data.options) {
+                        // <-- this could be more discrete
                         let exec_str = extract_executable(&launch_str);
                         let new_launch_str = format!("{} {}", exec_str, data.options);
                         info!("Setting launch string: \"{}\"", new_launch_str);
@@ -234,17 +237,20 @@ fn run_service(data: Box<ServiceData>) -> windows_service::Result<()> {
                             }
                         }
                     }
-                },
+                }
                 Err(e) => {
-                    error!("Failed to open the '{}' registry value: {}", ff_html_cmd_key, e);
+                    error!(
+                        "Failed to open the '{}' registry value: {}",
+                        ff_html_cmd_key, e
+                    );
                     stop.store(true, Ordering::SeqCst);
                 }
             }
 
-            match hkcr.open_subkey_with_flags(&ff_url_cmd_key, KEY_QUERY_VALUE|KEY_SET_VALUE) {
+            match hkcr.open_subkey_with_flags(&ff_url_cmd_key, KEY_QUERY_VALUE | KEY_SET_VALUE) {
                 Ok(reg_key) => {
-                    let launch_str : String = reg_key.get_value("").unwrap();
-        
+                    let launch_str: String = reg_key.get_value("").unwrap();
+
                     // have our user options been removed/overridden?
                     if !launch_str.contains(&data.options) {
                         let exec_str = extract_executable(&launch_str);
@@ -256,9 +262,12 @@ fn run_service(data: Box<ServiceData>) -> windows_service::Result<()> {
                             }
                         }
                     }
-                },
+                }
                 Err(e) => {
-                    error!("Failed to open the '{}' registry value: {}", ff_url_cmd_key, e);
+                    error!(
+                        "Failed to open the '{}' registry value: {}",
+                        ff_url_cmd_key, e
+                    );
                     stop.store(true, Ordering::SeqCst);
                 }
             }
