@@ -48,11 +48,10 @@ struct ServiceData {
 
 fn extract_executable(s : &str) -> String {
     let re = regex::Regex::new("\"(.+?)\"").unwrap();
-    for cap in re.captures_iter(s) {
-        return cap[0].to_string();
+    match re.find(s) {
+        Some(m) => m.as_str().to_string(),
+        None => String::new()
     }
-
-    String::new()
 }
 
 fn set_service_state(status_handle: &service_control_handler::ServiceStatusHandle, state: windows_service::service::ServiceState) -> windows_service::Result<()> {
@@ -143,16 +142,8 @@ fn service_main(arguments: Vec<OsString>) {
 
         if !arguments.is_empty() && arguments.len() > 1 {
             // convert 'arguments' into a form that argmap will digest
-            let mut v = vec![];
 
-            // note: 'arguments' is implicitly moved here
-            for a in arguments {
-                match a.into_string() {
-                    Ok(s) => { v.push(s) }
-                    Err(_e) => {}
-                };
-            }
-
+            let v: Vec<_> = arguments.into_iter().filter_map(|a| a.into_string().ok()).collect();
             let (_args, argv) = argmap::parse(v.into_iter());
 
             // look for the following arguments:
