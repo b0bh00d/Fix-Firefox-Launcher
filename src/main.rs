@@ -39,6 +39,7 @@ define_windows_service!(ffi_service_main, service_main);
 struct ServiceData {
     key: String,
     options: String,
+    types: Vec<String>,
     interval: u32,
 }
 
@@ -83,21 +84,30 @@ fn service_main(arguments: Vec<OsString>) {
     let mut data = Box::new(ServiceData {
         key: String::new(),
         options: String::from(DEFAULT_OPTIONS),
+        types: vec![],
         interval: DEFAULT_INTERVAL,
     });
 
-    // locate the Firefox entries in the HKCR tree
+    let ff_re = regex::Regex::new("^Firefox(.+?)-(.+?)$").unwrap();
+    data.types = vec![];
+
+    // locate all the Firefox* entries in the HKCR tree
     for i in RegKey::predef(HKEY_CLASSES_ROOT)
         .enum_keys()
         .map(|x| x.unwrap())
-        .filter(|x| x.starts_with("FirefoxHTML"))
+        .filter(|x| x.starts_with("Firefox"))
     {
-        // grab the key suffix value from the name
-        let items = i.split("-").collect::<Vec<_>>();
-        if items.len() > 1 {
-            data.key = items[1].to_string();
-        } else {
-            warn!("\"{}\" was not in the expected format; exiting.", i);
+        // grab the type and suffix values from the key name
+        let captures = ff_re.captures(&i).unwrap();
+
+        match captures.get(1) {
+            Some(val) => data.types.push(String::from(val.as_str())),
+            None => warn!("Failed to match type in \"{}\"", i),
+        }
+
+        match captures.get(2) {
+            Some(val) => data.key = String::from(val.as_str()),
+            None => warn!("Failed to match key in \"{}\"", i),
         }
     }
 
@@ -198,13 +208,48 @@ fn run_service(data: Box<ServiceData>) -> windows_service::Result<()> {
         }
     };
 
+    // closure to check a generic launch string, and correct it as required
+    let check_and_correct = |hkcr: &winreg::RegKey, data: &Box<ServiceData>, key_type: &str| {
+        let ff_cmd_key = format!(r"Firefox{}-{}\shell\open\command", key_type, data.key);
+        match hkcr.open_subkey_with_flags(&ff_cmd_key, KEY_QUERY_VALUE | KEY_SET_VALUE) {
+            Ok(reg_key) => {
+                let launch_str: String = reg_key.get_value("").unwrap();
+
+                // if the registry key does not contain the required
+                // options, then Firefox likely did an update and we
+                // need to check that the launcher string is using
+                // arguments that we prefer...
+
+                if !launch_str.contains(&data.options) {
+                    // <-- this could be more discrete
+                    let exec_str = extract_executable(&launch_str);
+                    let new_launch_str = format!("{} {}", exec_str, data.options);
+                    info!(
+                        "Correcting launch string for Firefox{}-{}: \"{}\" -> \"{}\"",
+                        key_type,
+                        data.key,
+                        &launch_str[exec_str.len()..],
+                        data.options
+                    );
+                    match reg_key.set_value("", &new_launch_str) {
+                        Ok(_) => (),
+                        Err(value) => {
+                            error!("{:?}", value);
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                error!("Failed to open the '{}' registry value: {}", ff_cmd_key, e);
+                stop.store(true, Ordering::SeqCst);
+            }
+        }
+    };
+
     // Register system service event handler
     let status_handle = service_control_handler::register(&APP_NAME, event_handler)?;
 
     set_service_state(&status_handle, ServiceState::Running)?;
-
-    let ff_html_cmd_key = format!(r"FirefoxHTML-{}\shell\open\command", data.key);
-    let ff_url_cmd_key = format!(r"FirefoxURL-{}\shell\open\command", data.key);
 
     let mut now = Instant::now();
 
@@ -216,60 +261,9 @@ fn run_service(data: Box<ServiceData>) -> windows_service::Result<()> {
         let elapsed = now.elapsed();
         if elapsed.as_secs() as u32 >= data.interval {
             let hkcr = RegKey::predef(HKEY_CLASSES_ROOT);
-            match hkcr.open_subkey_with_flags(&ff_html_cmd_key, KEY_QUERY_VALUE | KEY_SET_VALUE) {
-                Ok(reg_key) => {
-                    let launch_str: String = reg_key.get_value("").unwrap();
 
-                    // if the registry key does not contain the required
-                    // options, then Firefox likely did an update and we
-                    // need to check that the launcher string is using
-                    // arguments that we prefer...
-
-                    if !launch_str.contains(&data.options) {
-                        // <-- this could be more discrete
-                        let exec_str = extract_executable(&launch_str);
-                        let new_launch_str = format!("{} {}", exec_str, data.options);
-                        info!("Setting launch string: \"{}\"", new_launch_str);
-                        match reg_key.set_value("", &new_launch_str) {
-                            Ok(_) => (),
-                            Err(value) => {
-                                error!("{:?}", value);
-                            }
-                        }
-                    }
-                }
-                Err(e) => {
-                    error!(
-                        "Failed to open the '{}' registry value: {}",
-                        ff_html_cmd_key, e
-                    );
-                    stop.store(true, Ordering::SeqCst);
-                }
-            }
-
-            match hkcr.open_subkey_with_flags(&ff_url_cmd_key, KEY_QUERY_VALUE | KEY_SET_VALUE) {
-                Ok(reg_key) => {
-                    let launch_str: String = reg_key.get_value("").unwrap();
-
-                    // have our user options been removed/overridden?
-                    if !launch_str.contains(&data.options) {
-                        let exec_str = extract_executable(&launch_str);
-                        let new_launch_str = format!("{} {}", exec_str, data.options);
-                        match reg_key.set_value("", &new_launch_str) {
-                            Ok(_) => (),
-                            Err(value) => {
-                                error!("{:?}", value);
-                            }
-                        }
-                    }
-                }
-                Err(e) => {
-                    error!(
-                        "Failed to open the '{}' registry value: {}",
-                        ff_url_cmd_key, e
-                    );
-                    stop.store(true, Ordering::SeqCst);
-                }
+            for t in &data.types {
+                check_and_correct(&hkcr, &data, &t);
             }
 
             // restart our interval timer
