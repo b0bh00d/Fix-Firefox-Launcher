@@ -59,7 +59,7 @@ Then actually remove the Service from the system:
 
 ## Running
 
-You can start/stop the service from the command line, or you can configure it to run automatically from the Windows Services panel (recommended).  Operating the Service from the "Local System" account should be sufficient; in my testing, it has sufficient privileges to read and write the Firefox keys' values.  YMMV, though.
+You can start/stop the service from the command line, or you can configure it to run automatically from the Windows Services panel (recommended).  Operating the Service from the "Local System" will likely not be sufficient to allow the process to read/modify the Registry entries.  You can test that first, but the best approach will be to log the Service in using your regular Windows account credentials.
 
 The service emits messages to the system console, so you can check there (i.e., `Event Viewer` -> `Windows Logs` -> `Application`) for any runtime error messages.  Look for the SourceName "FixFirefoxLauncher".
 
