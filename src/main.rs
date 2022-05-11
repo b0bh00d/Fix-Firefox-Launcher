@@ -209,7 +209,7 @@ fn run_service(data: Box<ServiceData>) -> windows_service::Result<()> {
     };
 
     // closure to check a generic launch string, and correct it as required
-    let check_and_correct = |hkcr: &winreg::RegKey, data: &Box<ServiceData>, key_type: &str| -> bool {
+    let check_and_correct = |hkcr: &winreg::RegKey, data: &Box<ServiceData>, key_type: &str| {
         let ff_cmd_key = format!(r"Firefox{}-{}\shell\open\command", key_type, data.install_id);
         match hkcr.open_subkey_with_flags(&ff_cmd_key, KEY_QUERY_VALUE | KEY_SET_VALUE) {
             Ok(reg_key) => {
@@ -220,8 +220,7 @@ fn run_service(data: Box<ServiceData>) -> windows_service::Result<()> {
                 // need to check that the launcher string is using
                 // arguments that we prefer...
 
-                if !launch_str.contains(&data.options) {
-                    // <-- this could be more discrete
+                if !launch_str.contains(&data.options) { // <-- this could be more discrete
                     let exec_str = extract_executable(&launch_str);
                     let new_launch_str = format!("{} {}", exec_str, data.options);
                     info!(
@@ -232,19 +231,17 @@ fn run_service(data: Box<ServiceData>) -> windows_service::Result<()> {
                         data.options
                     );
                     match reg_key.set_value("", &new_launch_str) {
-                        Ok(_) => true,
+                        Ok(_) => (),
                         Err(value) => {
                             error!("{:?}", value);
-                            false
                         }
                     }
                 }
-                else {
-                    false
-                }
             }
-            // the key may not have a sub-key that is a launch string...
-            Err(_e) => false,
+            Err(e) => {
+                // the key may not have a sub-key that is a launch string...
+                warn!("Could not access \"{}\": {:?}", ff_cmd_key, e);
+            }
         }
     };
 
@@ -264,20 +261,8 @@ fn run_service(data: Box<ServiceData>) -> windows_service::Result<()> {
         if elapsed.as_secs() as u32 >= data.interval {
             let hkcr = RegKey::predef(HKEY_CLASSES_ROOT);
 
-            let mut count = 0;
-
             for t in &data.key_types {
-                match check_and_correct(&hkcr, &data, &t) {
-                    true => count += 1,
-                    false => ()
-                }
-            }
-
-            if count == 0 {
-                // we detected Registry keys, but we didn't process any of them?
-                // there's trouble somewhere in River City...
-                error!("Failed to process any of the {} Firefox* registry keys!", data.key_types.len());
-                stop.store(true, Ordering::SeqCst);
+                check_and_correct(&hkcr, &data, &t)
             }
 
             // reset our interval timer
